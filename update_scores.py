@@ -345,217 +345,19 @@ def fetch_html(url, extra_headers=None):
             pass  # 忽略 brotli，讓 decode 盡力處理
         return raw.decode('utf-8', errors='replace')
 
-def fetch_json(url, extra_headers=None):
-    headers = {
-        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
-                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'),
-        'Accept': 'application/json',
-    }
-    if extra_headers:
-        headers.update(extra_headers)
-    req = urllib.request.Request(url, headers=headers)
-    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
-        return json.loads(r.read())
-
-# ── 來源 1：ESPN API ──────────────────────────────────────────────────────────
-def fetch_espn_scores():
-    """ESPN scoreboard API，逐日掃描已完成場次"""
-    from datetime import date as date_cls, timedelta
-    scores = {}
-    start = date_cls(2026, 6, 11)
-    today = datetime.now(timezone.utc).date()
-    slugs = ['fifa.world', 'fifa.worldcup', 'fifa.world.2026']
-    for slug in slugs:
-        slug_events = []
-        d = start
-        while d <= today:
-            ds = d.strftime('%Y%m%d')
-            try:
-                day_data = fetch_json(
-                    f'https://site.api.espn.com/apis/v2/sports/soccer/{slug}/scoreboard?dates={ds}')
-                day_events = day_data.get('events', [])
-                slug_events += day_events
-            except Exception:
-                pass
-            d += timedelta(days=1)
-        print(f'      [ESPN/{slug}] {len(slug_events)} events')
-        for ev in slug_events:
-            comp = (ev.get('competitions') or [{}])[0]
-            status = comp.get('status', {}).get('type', {})
-            completed = status.get('completed') or status.get('name') in ('STATUS_FINAL', 'STATUS_FULL_TIME')
-            if not completed:
-                continue
-            comps = comp.get('competitors', [])
-            home = next((c for c in comps if c.get('homeAway') == 'home'), None)
-            away = next((c for c in comps if c.get('homeAway') == 'away'), None)
-            if not home or not away: continue
-            hk = _norm(home.get('team', {}).get('displayName', ''))
-            ak = _norm(away.get('team', {}).get('displayName', ''))
-            hs = str(home.get('score', ''))
-            as_ = str(away.get('score', ''))
-            if not hk or not ak or not hs or not as_: continue
-            _add_score(scores, hk, ak, hs, as_)
-        if scores:
-            break
-    return scores
-
-# ── 來源 2：FIFA 官方 API ─────────────────────────────────────────────────────
-def fetch_fifa_scores():
-    """FIFA 官方賽果 API"""
-    scores = {}
-    # FIFA API v3
-    urls = [
-        'https://api.fifa.com/api/v3/calendar/matches?from=2026-06-11&to=2026-07-20&language=EN&count=200&IdCompetition=&IdSeason=&IdStage=',
-        'https://www.fifa.com/fifaplus/en/tournaments/mens/worldcup/canadamexicousa2026/news',
-    ]
-    try:
-        data = fetch_json(urls[0], extra_headers={'Origin': 'https://www.fifa.com'})
-        results = data.get('Results', [])
-        print(f'      [FIFA] {len(results)} matches')
-        for m in results:
-            if m.get('MatchStatus') not in (0, 3):  # 0=upcoming 3=completed
-                continue
-            if m.get('MatchStatus') != 3:
-                continue
-            home = m.get('Home', {}).get('TeamName', [{}])
-            away = m.get('Away', {}).get('TeamName', [{}])
-            hname = (home[0].get('Description', '') if home else '')
-            aname = (away[0].get('Description', '') if away else '')
-            hs = str(m.get('Home', {}).get('Score', ''))
-            as_ = str(m.get('Away', {}).get('Score', ''))
-            hk = _norm(hname)
-            ak = _norm(aname)
-            if not hk or not ak or not hs or not as_: continue
-            _add_score(scores, hk, ak, hs, as_)
-    except Exception as e:
-        print(f'      [FIFA] err: {e}')
-    return scores
-
-# ── 來源 3：TheSportsDB（免費，無需 API key）──────────────────────────────────
-def fetch_thesportsdb_scores():
-    """TheSportsDB - league 4335 = FIFA World Cup"""
-    scores = {}
-    # 嘗試多個可能的 league ID
-    for lid in ['4335', '4480', '4396']:
-        try:
-            data = fetch_json(f'https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id={lid}&s=2026')
-            events = data.get('events') or []
-            print(f'      [TheSportsDB/league{lid}] {len(events)} events')
-            for ev in events:
-                status = ev.get('strStatus', '')
-                if status not in ('FT', 'AET', 'PEN', 'Match Finished', '90'):
-                    continue
-                hk = _norm(ev.get('strHomeTeam', ''))
-                ak = _norm(ev.get('strAwayTeam', ''))
-                hs = ev.get('intHomeScore')
-                as_ = ev.get('intAwayScore')
-                if not hk or not ak or hs is None or as_ is None: continue
-                _add_score(scores, hk, ak, str(hs), str(as_))
-            if scores:
-                break
-        except Exception as e:
-            print(f'      [TheSportsDB/league{lid}] err: {e}')
-    return scores
-
-# ── 來源 4：SofaScore 非官方 API ──────────────────────────────────────────────
-def fetch_sofascore_scores():
-    """SofaScore - 先查詢正確的 season ID 再抓比分"""
-    scores = {}
-    headers = {
-        'Referer': 'https://www.sofascore.com/',
-        'Origin': 'https://www.sofascore.com',
-    }
-    # 先查詢 tournament 16 的 seasons 列表
-    season_id = None
-    try:
-        meta = fetch_json('https://api.sofascore.com/api/v1/unique-tournament/16/seasons',
-                          extra_headers=headers)
-        seasons = meta.get('seasons', [])
-        print(f'      [SofaScore] seasons: {[(s.get("id"),s.get("name")) for s in seasons[:5]]}')
-        for s in seasons:
-            if '2026' in str(s.get('name', '')):
-                season_id = s['id']
-                break
-        if not season_id and seasons:
-            season_id = seasons[0]['id']  # 最新的
-    except Exception as e:
-        print(f'      [SofaScore seasons] err: {e}')
-
-    if not season_id:
-        return scores
-
-    try:
-        for page in range(0, 15):
-            url = (f'https://api.sofascore.com/api/v1/unique-tournament/16'
-                   f'/season/{season_id}/events/last/{page}')
-            data = fetch_json(url, extra_headers=headers)
-            events = data.get('events', [])
-            if not events:
-                break
-            for ev in events:
-                if ev.get('status', {}).get('type') != 'finished':
-                    continue
-                home = ev.get('homeTeam', {}).get('name', '')
-                away = ev.get('awayTeam', {}).get('name', '')
-                hs = ev.get('homeScore', {}).get('current')
-                as_ = ev.get('awayScore', {}).get('current')
-                hk = _norm(home)
-                ak = _norm(away)
-                if not hk or not ak or hs is None or as_ is None: continue
-                _add_score(scores, hk, ak, str(hs), str(as_))
-    except Exception as e:
-        print(f'      [SofaScore events] err: {e}')
-    return scores
-
-# ── 來源 5：worldfootball.net HTML 爬取 ──────────────────────────────────────
-def fetch_worldfootball_scores():
-    """worldfootball.net 爬取 2026 世界盃比分"""
-    scores = {}
-    urls = [
-        'https://www.worldfootball.net/schedule/wm-2026/1/',
-        'https://www.worldfootball.net/schedule/wm-2026/2/',
-        'https://www.worldfootball.net/schedule/wm-2026/3/',
-        'https://www.worldfootball.net/all_matches/wm-2026/',
-    ]
-    found_html = False
-    for url in urls:
-        try:
-            html = fetch_html(url)
-            if len(html) < 500:
-                continue
-            found_html = True
-            # 找比分行：隊名 - N:N - 隊名
-            for m in re.finditer(
-                r'class="[^"]*">\s*([A-Za-zÀ-ÿ\s\-\.\']+?)\s*</[^>]+>\s*'
-                r'[^<]*?(\d+)\s*:\s*(\d+)[^<]*?'
-                r'[^<]*?([A-Za-zÀ-ÿ\s\-\.\']+?)\s*</[^>]+>',
-                html
-            ):
-                hk = _norm(m.group(1).strip())
-                ak = _norm(m.group(4).strip())
-                if not hk or not ak: continue
-                _add_score(scores, hk, ak, m.group(2), m.group(3))
-        except Exception as e:
-            print(f'      [worldfootball] {url}: err={e}')
-    if not found_html:
-        print('      [worldfootball] 無法取得頁面')
-    return scores
-
-# ── 來源 6：worldcups.tw（繁中，格式穩定）────────────────────────────────────
+# ── 比分來源：worldcups.tw ────────────────────────────────────────────────────
 def fetch_worldcups_tw_scores():
-    """worldcups.tw 完整賽程表（含比分），繁體中文隊名"""
+    """從 worldcups.tw 完整賽程表抓取已結束場次的比分"""
     scores = {}
     try:
         html = fetch_html('https://worldcups.tw/livescore/')
         rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
-        print(f'      [worldcups.tw] {len(rows)} rows')
-        found = 0
         for row in rows:
             cells = [
                 re.sub(r'<[^>]+>', '', c).replace('\xa0', ' ').strip()
                 for c in re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
             ]
-            # 格式：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
+            # 欄位：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
             if len(cells) < 5: continue
             if '比賽結束' not in cells[4]: continue
             m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
@@ -564,34 +366,8 @@ def fetch_worldcups_tw_scores():
             ak = _norm(cells[3])
             if not hk or not ak: continue
             _add_score(scores, hk, ak, m.group(1), m.group(2))
-            found += 1
-        print(f'      [worldcups.tw] {found} 場已結束')
     except Exception as e:
-        print(f'      [worldcups.tw] err: {e}')
-    return scores
-
-# ── 來源 7：fifacom.tw（繁中，若未封鎖則使用）────────────────────────────────
-def fetch_fifacom_scores():
-    scores = {}
-    try:
-        html = fetch_html('https://fifacom.tw/schedule/')
-        rows = re.findall(r'<tr[\s\S]*?</tr>', html, re.IGNORECASE)
-        print(f'      [fifacom.tw] {len(rows)} rows')
-        for row in rows:
-            cells = [
-                re.sub(r'<[^>]+>', '', t).replace('\xa0', ' ').replace('&amp;', '&').strip()
-                for t in re.findall(r'<td[^>]*>([\s\S]*?)</td>', row, re.IGNORECASE)
-            ]
-            if len(cells) < 5: continue
-            m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
-            if not m: continue
-            if '比賽結束' not in cells[4]: continue
-            hk = _norm(cells[1])
-            ak = _norm(cells[3])
-            if not hk or not ak: continue
-            _add_score(scores, hk, ak, m.group(1), m.group(2))
-    except Exception as e:
-        print(f'      [fifacom.tw] err: {e}')
+        print(f'    ⚠️  worldcups.tw 失敗：{e}')
     return scores
 
 # ── 寫入 KV（透過 Cloudflare REST API） ──────────────────────────────────────
@@ -645,25 +421,10 @@ def kv_put(key, value_str):
 def main():
     scores = {}
 
-    sources = [
-        ('worldcups.tw',    fetch_worldcups_tw_scores),   # 主要：繁中，格式穩定
-        ('ESPN API',        fetch_espn_scores),
-        ('FIFA 官方 API',   fetch_fifa_scores),
-        ('TheSportsDB',     fetch_thesportsdb_scores),
-        ('SofaScore',       fetch_sofascore_scores),
-        ('worldfootball',   fetch_worldfootball_scores),
-        ('fifacom.tw',      fetch_fifacom_scores),
-    ]
-
-    for i, (name, fn) in enumerate(sources, 1):
-        print(f'📡  [{i}/{len(sources)}] 抓取 {name}...')
-        try:
-            s = fn()
-            new = {k: v for k, v in s.items() if k not in scores}
-            print(f'    ✅ {len(s)} 筆（新增 {len(new)} 筆）')
-            scores.update(s)
-        except Exception as e:
-            print(f'    ⚠️  失敗：{e}')
+    print('📡  抓取 worldcups.tw 比分...')
+    scores = fetch_worldcups_tw_scores()
+    if scores:
+        print(f'    ✅ {len(scores)} 筆比分')
 
     if not scores:
         print('⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
