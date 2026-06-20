@@ -1,0 +1,12 @@
+name = "wc2026-calendar"
+main = "src/index.js"
+compatibility_date = "2024-01-01"
+
+# KV namespace binding - replace namespace_id if needed
+[[kv_namespaces]]
+binding = "WC2026"
+id = "2bd8237a6b864195a66d83b522ff439f"
+
+# Cron: run every hour during World Cup (June 11 - July 19, 2026)
+[triggers]
+crons = ["0 * * * *"]
