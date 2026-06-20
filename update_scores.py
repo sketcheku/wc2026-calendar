@@ -457,12 +457,12 @@ def main():
         print(f'    ⚠️  失敗：{e}')
 
     if not scores:
-        print('❌  所有來源均無比分，請確認網路連線。'); sys.exit(1)
-
-    print(f'\n✅  合計 {len(scores)} 筆比分：')
-    for k, v in sorted(scores.items()):
-        t1, t2 = k.split('|')
-        print(f'    {t1} vs {t2}：{v}')
+        print('⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
+    else:
+        print(f'\n✅  合計 {len(scores)} 筆比分：')
+        for k, v in sorted(scores.items()):
+            t1, t2 = k.split('|')
+            print(f'    {t1} vs {t2}：{v}')
 
     print('\n🏗️   在本機生成 ICS...')
     ics = generate_ics(scores)
