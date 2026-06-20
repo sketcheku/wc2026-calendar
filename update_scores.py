@@ -541,7 +541,36 @@ def fetch_worldfootball_scores():
         print('      [worldfootball] 無法取得頁面')
     return scores
 
-# ── 來源 6：fifacom.tw（繁中，若未封鎖則使用）────────────────────────────────
+# ── 來源 6：worldcups.tw（繁中，格式穩定）────────────────────────────────────
+def fetch_worldcups_tw_scores():
+    """worldcups.tw 完整賽程表（含比分），繁體中文隊名"""
+    scores = {}
+    try:
+        html = fetch_html('https://worldcups.tw/livescore/')
+        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+        print(f'      [worldcups.tw] {len(rows)} rows')
+        found = 0
+        for row in rows:
+            cells = [
+                re.sub(r'<[^>]+>', '', c).replace('\xa0', ' ').strip()
+                for c in re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
+            ]
+            # 格式：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
+            if len(cells) < 5: continue
+            if '比賽結束' not in cells[4]: continue
+            m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
+            if not m: continue
+            hk = _norm(cells[1])
+            ak = _norm(cells[3])
+            if not hk or not ak: continue
+            _add_score(scores, hk, ak, m.group(1), m.group(2))
+            found += 1
+        print(f'      [worldcups.tw] {found} 場已結束')
+    except Exception as e:
+        print(f'      [worldcups.tw] err: {e}')
+    return scores
+
+# ── 來源 7：fifacom.tw（繁中，若未封鎖則使用）────────────────────────────────
 def fetch_fifacom_scores():
     scores = {}
     try:
@@ -617,6 +646,7 @@ def main():
     scores = {}
 
     sources = [
+        ('worldcups.tw',    fetch_worldcups_tw_scores),   # 主要：繁中，格式穩定
         ('ESPN API',        fetch_espn_scores),
         ('FIFA 官方 API',   fetch_fifa_scores),
         ('TheSportsDB',     fetch_thesportsdb_scores),
