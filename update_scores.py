@@ -280,14 +280,15 @@ def generate_ics(scores_map):
     lines += ['', 'END:VCALENDAR']
     return ''.join(fold_line(l) for l in lines)
 
-# ── ESPN 隊名對應 ─────────────────────────────────────────────────────────────
-ESPN_ALIAS = {
+# ── 隊名別名對應（統一映射到 MATCHES 中使用的英文 key）──────────────────────
+TEAM_ALIAS = {
+    # 英文變體
     'Mexico':'Mexico','South Africa':'South Africa',
-    'Korea Republic':'South Korea','South Korea':'South Korea',
+    'Korea Republic':'South Korea','Republic of Korea':'South Korea','South Korea':'South Korea',
     'Czech Republic':'Czechia','Czechia':'Czechia',
     'Canada':'Canada',
     'Bosnia and Herzegovina':'Bosnia','Bosnia & Herzegovina':'Bosnia','Bosnia':'Bosnia',
-    'USA':'USA','United States':'USA',
+    'USA':'USA','United States':'USA','United States of America':'USA',
     'Paraguay':'Paraguay','Qatar':'Qatar','Switzerland':'Switzerland',
     'Brazil':'Brazil','Morocco':'Morocco','Haiti':'Haiti','Scotland':'Scotland',
     'Australia':'Australia',
@@ -305,85 +306,212 @@ ESPN_ALIAS = {
     'Argentina':'Argentina','Algeria':'Algeria','Austria':'Austria','Jordan':'Jordan',
     'Portugal':'Portugal',
     'DR Congo':'DRCongo','Congo DR':'DRCongo','D.R. Congo':'DRCongo',
-    'Democratic Republic of the Congo':'DRCongo',
+    'Democratic Republic of the Congo':'DRCongo','Congo, DR':'DRCongo',
     'England':'England','Croatia':'Croatia','Ghana':'Ghana',
     'Panama':'Panama','Colombia':'Colombia','Uzbekistan':'Uzbekistan',
+    # 繁體中文（用於中文來源）
+    **ZH_ALIAS,
 }
 
-# ── 抓取比分 ──────────────────────────────────────────────────────────────────
-def fetch_html(url):
-    req = urllib.request.Request(url, headers={
+def _norm(name):
+    """將隊名正規化為 MATCHES 中使用的 key"""
+    return TEAM_ALIAS.get(name) or TEAM_ALIAS.get(name.strip())
+
+def _add_score(scores, h_key, a_key, hs, as_):
+    """嘗試兩種方向加入比分"""
+    k1, k2 = f'{h_key}|{a_key}', f'{a_key}|{h_key}'
+    if k1 in VALID_KEYS:
+        scores[k1] = f'{hs}-{as_}'
+    elif k2 in VALID_KEYS:
+        scores[k2] = f'{as_}-{hs}'
+
+# ── 抓取工具 ──────────────────────────────────────────────────────────────────
+def fetch_html(url, extra_headers=None):
+    headers = {
         'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
                        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'),
-        'Accept': 'text/html,application/xhtml+xml',
-        'Accept-Language': 'zh-TW,zh;q=0.9',
-    })
-    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as r:
+        'Accept': 'text/html,application/xhtml+xml,*/*',
+        'Accept-Language': 'zh-TW,zh;q=0.9,en;q=0.8',
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         raw = r.read()
-        if 'gzip' in r.getheader('Content-Encoding', ''):
+        enc = r.getheader('Content-Encoding', '')
+        if 'gzip' in enc:
             import gzip; raw = gzip.decompress(raw)
+        elif 'br' in enc:
+            pass  # 忽略 brotli，讓 decode 盡力處理
         return raw.decode('utf-8', errors='replace')
 
-def fetch_json(url):
-    req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
-    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as r:
+def fetch_json(url, extra_headers=None):
+    headers = {
+        'User-Agent': ('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'),
+        'Accept': 'application/json',
+    }
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, headers=headers)
+    with urllib.request.urlopen(req, timeout=20, context=_SSL_CTX) as r:
         return json.loads(r.read())
 
-def parse_fifacom_scores(html):
-    scores = {}
-    for row in re.findall(r'<tr[\s\S]*?</tr>', html, re.IGNORECASE):
-        cells = [
-            re.sub(r'<[^>]+>', '', t).replace('\xa0', ' ').replace('&amp;', '&').strip()
-            for t in re.findall(r'<td[^>]*>([\s\S]*?)</td>', row, re.IGNORECASE)
-        ]
-        if len(cells) < 5: continue
-        m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
-        if not m: continue
-        if '比賽結束' not in cells[4]: continue
-        home = ZH_ALIAS.get(cells[1])
-        away = ZH_ALIAS.get(cells[3])
-        if not home or not away: continue
-        k1, k2 = f'{home}|{away}', f'{away}|{home}'
-        if k1 in VALID_KEYS:
-            scores[k1] = f'{m.group(1)}-{m.group(2)}'
-        elif k2 in VALID_KEYS:
-            scores[k2] = f'{m.group(2)}-{m.group(1)}'
-    return scores
-
+# ── 來源 1：ESPN API ──────────────────────────────────────────────────────────
 def fetch_espn_scores():
-    """從 ESPN API 抓取所有已完成的世界盃場次（逐日掃描）"""
+    """ESPN scoreboard API，逐日掃描已完成場次"""
     from datetime import date as date_cls, timedelta
     scores = {}
     start = date_cls(2026, 6, 11)
     today = datetime.now(timezone.utc).date()
-    d = start
-    while d <= today:
-        ds = d.strftime('%Y%m%d')
+    # ESPN 支援 date range，一次抓完
+    date_from = start.strftime('%Y%m%d')
+    date_to   = today.strftime('%Y%m%d')
+    slugs = ['fifa.world', 'fifa.worldcup', 'fifa.world.2026']
+    for slug in slugs:
         try:
-            data = fetch_json(
-                f'https://site.api.espn.com/apis/v2/sports/soccer/fifa.world/scoreboard?dates={ds}'
-            )
-            for ev in data.get('events', []):
+            url = (f'https://site.api.espn.com/apis/v2/sports/soccer/{slug}/scoreboard'
+                   f'?dates={date_from}-{date_to}&limit=200')
+            data = fetch_json(url)
+            events = data.get('events', [])
+            if not events:
+                # 也試逐日
+                d = start
+                while d <= today:
+                    ds = d.strftime('%Y%m%d')
+                    try:
+                        day_data = fetch_json(
+                            f'https://site.api.espn.com/apis/v2/sports/soccer/{slug}/scoreboard?dates={ds}')
+                        events += day_data.get('events', [])
+                    except Exception:
+                        pass
+                    d += timedelta(days=1)
+            for ev in events:
                 comp = (ev.get('competitions') or [{}])[0]
-                if not comp.get('status', {}).get('type', {}).get('completed'):
+                status = comp.get('status', {}).get('type', {})
+                if not (status.get('completed') or status.get('name') == 'STATUS_FINAL'):
                     continue
-                competitors = comp.get('competitors', [])
-                home = next((c for c in competitors if c.get('homeAway') == 'home'), None)
-                away = next((c for c in competitors if c.get('homeAway') == 'away'), None)
+                comps = comp.get('competitors', [])
+                home = next((c for c in comps if c.get('homeAway') == 'home'), None)
+                away = next((c for c in comps if c.get('homeAway') == 'away'), None)
                 if not home or not away: continue
-                hk = ESPN_ALIAS.get(home.get('team', {}).get('displayName', ''))
-                ak = ESPN_ALIAS.get(away.get('team', {}).get('displayName', ''))
+                hk = _norm(home.get('team', {}).get('displayName', ''))
+                ak = _norm(away.get('team', {}).get('displayName', ''))
                 if not hk or not ak: continue
-                hs, as_ = home.get('score', ''), away.get('score', '')
-                if not hs or not as_: continue
-                k1, k2 = f'{hk}|{ak}', f'{ak}|{hk}'
-                if k1 in VALID_KEYS:
-                    scores[k1] = f'{hs}-{as_}'
-                elif k2 in VALID_KEYS:
-                    scores[k2] = f'{as_}-{hs}'
-        except Exception as e:
-            pass  # 某天無賽事或抓取失敗，靜默跳過
-        d += timedelta(days=1)
+                hs = home.get('score', '')
+                as_ = away.get('score', '')
+                if hs == '' or as_ == '': continue
+                _add_score(scores, hk, ak, hs, as_)
+            if scores:
+                break  # 找到資料就不試下一個 slug
+        except Exception:
+            pass
+    return scores
+
+# ── 來源 2：TheSportsDB（免費，無需 API key）──────────────────────────────────
+def fetch_thesportsdb_scores():
+    """TheSportsDB - league 4335 = FIFA World Cup"""
+    scores = {}
+    try:
+        # 先嘗試 2026 賽季
+        data = fetch_json('https://www.thesportsdb.com/api/v1/json/3/eventsseason.php?id=4335&s=2026')
+        events = data.get('events') or []
+        for ev in events:
+            if ev.get('strStatus') not in ('FT', 'AET', 'PEN', 'Match Finished'):
+                continue
+            hk = _norm(ev.get('strHomeTeam', ''))
+            ak = _norm(ev.get('strAwayTeam', ''))
+            hs = ev.get('intHomeScore', '')
+            as_ = ev.get('intAwayScore', '')
+            if not hk or not ak or hs is None or as_ is None: continue
+            _add_score(scores, hk, ak, str(hs), str(as_))
+    except Exception:
+        pass
+    return scores
+
+# ── 來源 3：SofaScore 非官方 API ──────────────────────────────────────────────
+def fetch_sofascore_scores():
+    """SofaScore - tournament 16 = FIFA World Cup"""
+    scores = {}
+    # 嘗試取得 2026 World Cup 的 season ID
+    season_ids = [61855, 63814, 64000]  # 可能的 season ID，逐一嘗試
+    headers = {
+        'Referer': 'https://www.sofascore.com/',
+        'Origin': 'https://www.sofascore.com',
+    }
+    for season_id in season_ids:
+        try:
+            # 抓最後 N 頁已完成賽事
+            for page in range(0, 10):
+                url = (f'https://api.sofascore.com/api/v1/unique-tournament/16'
+                       f'/season/{season_id}/events/last/{page}')
+                data = fetch_json(url, extra_headers=headers)
+                events = data.get('events', [])
+                if not events:
+                    break
+                for ev in events:
+                    if ev.get('status', {}).get('type') != 'finished':
+                        continue
+                    home = ev.get('homeTeam', {}).get('name', '')
+                    away = ev.get('awayTeam', {}).get('name', '')
+                    hs = ev.get('homeScore', {}).get('current')
+                    as_ = ev.get('awayScore', {}).get('current')
+                    hk = _norm(home)
+                    ak = _norm(away)
+                    if not hk or not ak or hs is None or as_ is None: continue
+                    _add_score(scores, hk, ak, str(hs), str(as_))
+            if scores:
+                break
+        except Exception:
+            pass
+    return scores
+
+# ── 來源 4：worldfootball.net HTML 爬取 ──────────────────────────────────────
+def fetch_worldfootball_scores():
+    """worldfootball.net 爬取 2026 世界盃比分"""
+    scores = {}
+    urls = [
+        'https://www.worldfootball.net/schedule/wm-2026/1/',
+        'https://www.worldfootball.net/schedule/wm-2026/2/',
+        'https://www.worldfootball.net/schedule/wm-2026/3/',
+    ]
+    for url in urls:
+        try:
+            html = fetch_html(url)
+            # 格式：<td>Team A</td><td>N:N</td><td>Team B</td>
+            for m in re.finditer(
+                r'<td[^>]*>([^<]{3,30})</td>\s*<td[^>]*>(\d+):(\d+)</td>\s*<td[^>]*>([^<]{3,30})</td>',
+                html, re.IGNORECASE
+            ):
+                hk = _norm(m.group(1).strip())
+                ak = _norm(m.group(4).strip())
+                hs, as_ = m.group(2), m.group(3)
+                if not hk or not ak: continue
+                _add_score(scores, hk, ak, hs, as_)
+        except Exception:
+            pass
+    return scores
+
+# ── 來源 5：fifacom.tw（繁中，若未封鎖則使用）────────────────────────────────
+def fetch_fifacom_scores():
+    scores = {}
+    try:
+        html = fetch_html('https://fifacom.tw/schedule/')
+        for row in re.findall(r'<tr[\s\S]*?</tr>', html, re.IGNORECASE):
+            cells = [
+                re.sub(r'<[^>]+>', '', t).replace('\xa0', ' ').replace('&amp;', '&').strip()
+                for t in re.findall(r'<td[^>]*>([\s\S]*?)</td>', row, re.IGNORECASE)
+            ]
+            if len(cells) < 5: continue
+            m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
+            if not m: continue
+            if '比賽結束' not in cells[4]: continue
+            hk = _norm(cells[1])
+            ak = _norm(cells[3])
+            if not hk or not ak: continue
+            _add_score(scores, hk, ak, m.group(1), m.group(2))
+    except Exception:
+        pass
     return scores
 
 # ── 寫入 KV（透過 Cloudflare REST API） ──────────────────────────────────────
@@ -437,24 +565,23 @@ def kv_put(key, value_str):
 def main():
     scores = {}
 
-    # ── 來源 1：fifacom.tw（繁體中文，含所有歷史比分）──────────────────────────
-    print('📡  [1/2] 抓取 fifacom.tw...')
-    try:
-        html = fetch_html('https://fifacom.tw/schedule/')
-        s1 = parse_fifacom_scores(html)
-        print(f'    ✅ {len(s1)} 筆')
-        scores.update(s1)
-    except Exception as e:
-        print(f'    ⚠️  失敗：{e}')
+    sources = [
+        ('ESPN API',        fetch_espn_scores),
+        ('TheSportsDB',     fetch_thesportsdb_scores),
+        ('SofaScore',       fetch_sofascore_scores),
+        ('worldfootball',   fetch_worldfootball_scores),
+        ('fifacom.tw',      fetch_fifacom_scores),
+    ]
 
-    # ── 來源 2：ESPN API（更即時，自動覆蓋相同場次）────────────────────────────
-    print('📡  [2/2] 抓取 ESPN...')
-    try:
-        s2 = fetch_espn_scores()
-        print(f'    ✅ {len(s2)} 筆')
-        scores.update(s2)   # ESPN 較即時，同場次以 ESPN 為準
-    except Exception as e:
-        print(f'    ⚠️  失敗：{e}')
+    for i, (name, fn) in enumerate(sources, 1):
+        print(f'📡  [{i}/{len(sources)}] 抓取 {name}...')
+        try:
+            s = fn()
+            new = {k: v for k, v in s.items() if k not in scores}
+            print(f'    ✅ {len(s)} 筆（新增 {len(new)} 筆）')
+            scores.update(s)
+        except Exception as e:
+            print(f'    ⚠️  失敗：{e}')
 
     if not scores:
         print('⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
