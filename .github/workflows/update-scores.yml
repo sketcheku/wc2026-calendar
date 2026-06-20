@@ -1,0 +1,27 @@
+name: 更新世界盃比分
+
+on:
+  schedule:
+    # 每 2 小時執行一次（UTC 時間）
+    # 世界盃期間台灣約 06:00~翌日 04:00 有賽事，這個頻率足夠
+    - cron: '0 */2 * * *'
+  workflow_dispatch:   # 允許手動在 GitHub 網頁觸發
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: 更新比分並寫入 Cloudflare KV
+        env:
+          CF_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+        run: python update_scores.py
