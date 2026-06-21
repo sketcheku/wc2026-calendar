@@ -52,8 +52,11 @@ NAMES_ZH = {
 }
 
 ZH_ALIAS = {
-  '墨西哥':'Mexico','南非':'South Africa','南韓':'South Korea','捷克':'Czechia',
-  '加拿大':'Canada','波士尼亞':'Bosnia','美國':'USA','巴拉圭':'Paraguay',
+  '墨西哥':'Mexico','南非':'South Africa',
+  '南韓':'South Korea','韓國':'South Korea',          # worldcups.tw/Fifa世界杯.tw 兩種寫法
+  '捷克':'Czechia','加拿大':'Canada',
+  '波士尼亞':'Bosnia','波士尼亞與赫塞哥維納':'Bosnia', # Fifa世界杯.tw 全名
+  '美國':'USA','巴拉圭':'Paraguay',
   '卡達':'Qatar','瑞士':'Switzerland','巴西':'Brazil','摩洛哥':'Morocco',
   '海地':'Haiti','蘇格蘭':'Scotland',
   '澳大利亞':'Australia','澳洲':'Australia',
@@ -66,7 +69,8 @@ ZH_ALIAS = {
   '伊拉克':'Iraq','挪威':'Norway','阿根廷':'Argentina',
   '阿爾及利亞':'Algeria','奧地利':'Austria','約旦':'Jordan',
   '葡萄牙':'Portugal','剛果民主共和國':'DRCongo',
-  '英格蘭':'England','克羅埃西亞':'Croatia','迦納':'Ghana',
+  '英格蘭':'England','克羅埃西亞':'Croatia',
+  '迦納':'Ghana','加納':'Ghana',                      # 兩種繁中寫法
   '巴拿馬':'Panama','哥倫比亞':'Colombia','烏茲別克':'Uzbekistan',
 }
 
@@ -85,43 +89,44 @@ STAGE_EN = {
 }
 
 # ── 104 場賽事 [no, dtstart_utc, dur_min, venue, t1, t2, stage] ──────────────
+# 時間均為 UTC，台灣時間 = UTC+8
 MATCHES = [
-  [1,'20260611T190000Z',120,'Azteca','Mexico','South Africa','GA'],
-  [2,'20260612T020000Z',120,'Akron','South Korea','Czechia','GA'],
-  [3,'20260612T190000Z',120,'BMO','Canada','Bosnia','GB'],
-  [4,'20260613T010000Z',120,'SoFi','USA','Paraguay','GD'],
-  [5,'20260613T160000Z',120,'Levis','Qatar','Switzerland','GB'],
-  [6,'20260613T200000Z',120,'MetLife','Brazil','Morocco','GC'],
-  [7,'20260613T230000Z',120,'Gillette','Haiti','Scotland','GC'],
-  [8,'20260614T170000Z',120,'BC','Australia','Turkey','GD'],
-  [9,'20260614T200000Z',120,'NRG','Germany','Curacao','GE'],
-  [10,'20260614T230000Z',120,'ATT','Netherlands','Japan','GF'],
-  [11,'20260615T020000Z',120,'LFF','IvoryCoast','Ecuador','GE'],
-  [12,'20260615T040000Z',120,'BBVA','Sweden','Tunisia','GF'],
-  [13,'20260615T160000Z',120,'MBZ','Spain','CapeVerde','GH'],
-  [14,'20260615T190000Z',120,'Lumen','Belgium','Egypt','GG'],
-  [15,'20260615T230000Z',120,'HardRock','SaudiArabia','Uruguay','GH'],
-  [16,'20260616T020000Z',120,'SoFi','Iran','NewZealand','GG'],
-  [17,'20260616T190000Z',120,'MetLife','France','Senegal','GI'],
-  [18,'20260616T220000Z',120,'Gillette','Iraq','Norway','GI'],
-  [19,'20260617T010000Z',120,'Arrowhead','Argentina','Algeria','GJ'],
-  [20,'20260617T170000Z',120,'Levis','Austria','Jordan','GJ'],
-  [21,'20260617T200000Z',120,'NRG','Portugal','DRCongo','GK'],
-  [22,'20260617T230000Z',120,'ATT','England','Croatia','GL'],
-  [23,'20260618T020000Z',120,'BMO','Ghana','Panama','GL'],
-  [24,'20260618T040000Z',120,'Azteca','Colombia','Uzbekistan','GK'],
-  [25,'20260618T190000Z',120,'MBZ','Czechia','South Africa','GA'],
-  [26,'20260618T220000Z',120,'SoFi','Switzerland','Bosnia','GB'],
-  [27,'20260619T010000Z',120,'BC','Canada','Qatar','GB'],
-  [28,'20260619T040000Z',120,'Akron','Mexico','South Korea','GA'],
-  [29,'20260619T190000Z',120,'Lumen','USA','Australia','GD'],
-  [30,'20260619T220000Z',120,'Gillette','Scotland','Morocco','GC'],
-  [31,'20260620T003000Z',120,'LFF','Brazil','Haiti','GC'],
-  [32,'20260620T030000Z',120,'Levis','Turkey','Paraguay','GD'],
-  [33,'20260620T040000Z',120,'BBVA','Tunisia','Japan','GF'],
-  [34,'20260620T170000Z',120,'NRG','Netherlands','Sweden','GF'],
-  [35,'20260620T200000Z',120,'BMO','Germany','IvoryCoast','GE'],
-  [36,'20260621T000000Z',120,'Arrowhead','Ecuador','Curacao','GE'],
+  [1,'20260611T190000Z',120,'Azteca','Mexico','South Africa','GA'],      # TW 06/12 03:00
+  [2,'20260612T020000Z',120,'Akron','South Korea','Czechia','GA'],       # TW 06/12 10:00
+  [3,'20260612T190000Z',120,'BMO','Canada','Bosnia','GB'],               # TW 06/13 03:00
+  [4,'20260613T010000Z',120,'SoFi','USA','Paraguay','GD'],               # TW 06/13 09:00
+  [5,'20260613T190000Z',120,'Levis','Qatar','Switzerland','GB'],         # TW 06/14 03:00
+  [6,'20260613T220000Z',120,'MetLife','Brazil','Morocco','GC'],          # TW 06/14 06:00
+  [7,'20260614T010000Z',120,'Gillette','Haiti','Scotland','GC'],         # TW 06/14 09:00
+  [8,'20260614T040000Z',120,'BC','Australia','Turkey','GD'],             # TW 06/14 12:00
+  [9,'20260614T170000Z',120,'NRG','Germany','Curacao','GE'],             # TW 06/15 01:00
+  [10,'20260614T200000Z',120,'ATT','Netherlands','Japan','GF'],          # TW 06/15 04:00
+  [11,'20260614T230000Z',120,'LFF','IvoryCoast','Ecuador','GE'],         # TW 06/15 07:00
+  [12,'20260615T020000Z',120,'BBVA','Sweden','Tunisia','GF'],            # TW 06/15 10:00
+  [13,'20260615T160000Z',120,'MBZ','Spain','CapeVerde','GH'],            # TW 06/16 00:00
+  [14,'20260615T190000Z',120,'Lumen','Belgium','Egypt','GG'],            # TW 06/16 03:00
+  [15,'20260615T220000Z',120,'HardRock','SaudiArabia','Uruguay','GH'],   # TW 06/16 06:00
+  [16,'20260616T010000Z',120,'SoFi','Iran','NewZealand','GG'],           # TW 06/16 09:00
+  [17,'20260616T190000Z',120,'MetLife','France','Senegal','GI'],         # TW 06/17 03:00
+  [18,'20260616T220000Z',120,'Gillette','Iraq','Norway','GI'],           # TW 06/17 06:00
+  [19,'20260617T010000Z',120,'Arrowhead','Argentina','Algeria','GJ'],    # TW 06/17 09:00
+  [20,'20260617T040000Z',120,'Levis','Austria','Jordan','GJ'],           # TW 06/17 12:00
+  [21,'20260617T170000Z',120,'NRG','Portugal','DRCongo','GK'],           # TW 06/18 01:00
+  [22,'20260617T200000Z',120,'ATT','England','Croatia','GL'],            # TW 06/18 04:00
+  [23,'20260617T230000Z',120,'BMO','Ghana','Panama','GL'],               # TW 06/18 07:00
+  [24,'20260618T020000Z',120,'Azteca','Colombia','Uzbekistan','GK'],     # TW 06/18 10:00
+  [25,'20260618T160000Z',120,'MBZ','Czechia','South Africa','GA'],       # TW 06/19 00:00
+  [26,'20260618T190000Z',120,'SoFi','Switzerland','Bosnia','GB'],        # TW 06/19 03:00
+  [27,'20260618T220000Z',120,'BC','Canada','Qatar','GB'],                # TW 06/19 06:00
+  [28,'20260619T010000Z',120,'Akron','Mexico','South Korea','GA'],       # TW 06/19 09:00
+  [29,'20260619T190000Z',120,'Lumen','USA','Australia','GD'],            # TW 06/20 03:00
+  [30,'20260619T220000Z',120,'Gillette','Scotland','Morocco','GC'],      # TW 06/20 06:00
+  [31,'20260620T003000Z',120,'LFF','Brazil','Haiti','GC'],               # TW 06/20 08:30
+  [32,'20260620T030000Z',120,'Levis','Turkey','Paraguay','GD'],          # TW 06/20 11:00
+  [33,'20260620T170000Z',120,'NRG','Netherlands','Sweden','GF'],         # TW 06/21 01:00
+  [34,'20260620T200000Z',120,'BMO','Germany','IvoryCoast','GE'],         # TW 06/21 04:00
+  [35,'20260621T000000Z',120,'Arrowhead','Ecuador','Curacao','GE'],      # TW 06/21 08:00
+  [36,'20260621T040000Z',120,'BBVA','Tunisia','Japan','GF'],             # TW 06/21 12:00
   [37,'20260621T160000Z',120,'MBZ','Spain','SaudiArabia','GH'],
   [38,'20260621T190000Z',120,'SoFi','Belgium','Iran','GG'],
   [39,'20260621T220000Z',120,'HardRock','Uruguay','CapeVerde','GH'],
@@ -232,7 +237,9 @@ def fold_line(line):
     return '\r\n'.join(parts) + '\r\n'
 
 # ── ICS 生成 ──────────────────────────────────────────────────────────────────
-def generate_ics(scores_map):
+def generate_ics(scores_map, scorers_map=None):
+    if scorers_map is None:
+        scorers_map = {}
     lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
@@ -250,20 +257,25 @@ def generate_ics(scores_map):
         stage_en = STAGE_EN[stage]
         t1zh = NAMES_ZH.get(t1, t1)
         t2zh = NAMES_ZH.get(t2, t2)
-        score = scores_map.get(f'{t1}|{t2}')
+        match_key = f'{t1}|{t2}'
+        score = scores_map.get(match_key)
+        scorers = scorers_map.get(match_key, '')
 
         summary = f'{stage_zh}｜{t1zh} vs {t2zh}（{score}）' if score else f'{stage_zh}｜{t1zh} vs {t2zh}'
         location = f'{v["name"]}\\, {v["city"]}'
         tw_time = utc_to_tw(dtstart)
         local_time = utc_to_local(dtstart, v['off'])
-        desc = '\\n'.join([
+        desc_parts = [
             f'對戰：{t1zh} vs {t2zh}',
             f'階段：{stage_zh} / {stage_en}',
             f'台灣時間：{tw_time}（UTC+8）',
             f'當地時間：{local_time}（{v["tz"]}）',
             f'地點：{v["name"]}\\, {v["city"]}',
-            '提醒：賽程可能因 FIFA 公告更新而調整。',
-        ])
+        ]
+        if scorers:
+            desc_parts.append(f'進球：{scorers}')
+        desc_parts.append('提醒：賽程可能因 FIFA 公告更新而調整。')
+        desc = '\\n'.join(desc_parts)
 
         lines += [
             '',
@@ -309,8 +321,12 @@ TEAM_ALIAS = {
     'Democratic Republic of the Congo':'DRCongo','Congo, DR':'DRCongo',
     'England':'England','Croatia':'Croatia','Ghana':'Ghana',
     'Panama':'Panama','Colombia':'Colombia','Uzbekistan':'Uzbekistan',
-    # 繁體中文（用於中文來源）
+    # 繁體中文（用於中文來源，含兩網站不同寫法）
     **ZH_ALIAS,
+    # Fifa世界杯.tw 額外變體（ZH_ALIAS 裡已含，這裡確保 TEAM_ALIAS 也有）
+    '韓國':'South Korea',
+    '加納':'Ghana',
+    '波士尼亞與赫塞哥維納':'Bosnia',
 }
 
 def _norm(name):
@@ -345,30 +361,64 @@ def fetch_html(url, extra_headers=None):
             pass  # 忽略 brotli，讓 decode 盡力處理
         return raw.decode('utf-8', errors='replace')
 
+# ── 共用：解析含比分與進球資訊的 HTML 表格 ──────────────────────────────────
+def _parse_score_table(html):
+    """解析 worldcups.tw / Fifa世界杯.tw 格式的賽程表，回傳 (scores, scorers)"""
+    scores = {}
+    scorers = {}
+    rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
+    last_key = None
+    for row in rows:
+        cells = [
+            re.sub(r'<[^>]+>', '', c).replace('\xa0', ' ').strip()
+            for c in re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
+        ]
+        # 進球資訊列：第一格含 ⚽ 或「分」且其餘格為空
+        if cells and ('⚽' in cells[0] or ('分' in cells[0] and len(cells[0]) > 5)) \
+                and all(c == '' for c in cells[1:]):
+            if last_key:
+                scorers[last_key] = re.sub(r'\s+', ' ', cells[0]).strip()
+            last_key = None
+            continue
+        # 比賽主列：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
+        if len(cells) < 5:
+            last_key = None
+            continue
+        if '比賽結束' not in cells[4]:
+            last_key = None
+            continue
+        m = re.search(r'(\d+)\s*[:\-]\s*(\d+)', cells[2])
+        if not m:
+            last_key = None
+            continue
+        hk = _norm(cells[1])
+        ak = _norm(cells[3])
+        if not hk or not ak:
+            last_key = None
+            continue
+        _add_score(scores, hk, ak, m.group(1), m.group(2))
+        k1, k2 = f'{hk}|{ak}', f'{ak}|{hk}'
+        last_key = k1 if k1 in VALID_KEYS else (k2 if k2 in VALID_KEYS else None)
+    return scores, scorers
+
 # ── 比分來源：worldcups.tw ────────────────────────────────────────────────────
 def fetch_worldcups_tw_scores():
-    """從 worldcups.tw 完整賽程表抓取已結束場次的比分"""
-    scores = {}
+    """從 worldcups.tw 抓取比分與進球資訊，回傳 (scores_map, scorers_map)"""
     try:
         html = fetch_html('https://worldcups.tw/livescore/')
-        rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
-        for row in rows:
-            cells = [
-                re.sub(r'<[^>]+>', '', c).replace('\xa0', ' ').strip()
-                for c in re.findall(r'<td[^>]*>(.*?)</td>', row, re.DOTALL | re.IGNORECASE)
-            ]
-            # 欄位：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
-            if len(cells) < 5: continue
-            if '比賽結束' not in cells[4]: continue
-            m = re.search(r'(\d+)\s*:\s*(\d+)', cells[2])
-            if not m: continue
-            hk = _norm(cells[1])
-            ak = _norm(cells[3])
-            if not hk or not ak: continue
-            _add_score(scores, hk, ak, m.group(1), m.group(2))
+        return _parse_score_table(html)
     except Exception as e:
         print(f'    ⚠️  worldcups.tw 失敗：{e}')
-    return scores
+        return {}, {}
+
+def fetch_fifatw_scores():
+    """從 Fifa世界杯.tw 抓取比分與進球資訊（備用來源），回傳 (scores_map, scorers_map)"""
+    try:
+        html = fetch_html('https://xn--fifa-tc5fq65k1ju.tw/world-cup-2026-schedule/')
+        return _parse_score_table(html)
+    except Exception as e:
+        print(f'    ⚠️  Fifa世界杯.tw 失敗：{e}')
+        return {}, {}
 
 # ── 寫入 KV（透過 Cloudflare REST API） ──────────────────────────────────────
 def get_cf_token():
@@ -421,10 +471,21 @@ def kv_put(key, value_str):
 def main():
     scores = {}
 
-    print('📡  抓取 worldcups.tw 比分...')
-    scores = fetch_worldcups_tw_scores()
-    if scores:
-        print(f'    ✅ {len(scores)} 筆比分')
+    print('📡  抓取 worldcups.tw 比分與進球資訊...')
+    scores, scorers = fetch_worldcups_tw_scores()
+    print(f'    ✅ {len(scores)} 筆比分，{len(scorers)} 場有進球資訊')
+
+    print('📡  抓取 Fifa世界杯.tw（補充來源）...')
+    scores2, scorers2 = fetch_fifatw_scores()
+    print(f'    ✅ {len(scores2)} 筆比分，{len(scorers2)} 場有進球資訊')
+    # 合併：以 worldcups.tw 為主，Fifa世界杯.tw 補缺漏
+    for k, v in scores2.items():
+        if k not in scores:
+            scores[k] = v
+    for k, v in scorers2.items():
+        if k not in scorers:
+            scorers[k] = v
+    print(f'    合計 {len(scores)} 筆比分，{len(scorers)} 場有進球資訊')
 
     if not scores:
         print('⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
@@ -432,10 +493,11 @@ def main():
         print(f'\n✅  合計 {len(scores)} 筆比分：')
         for k, v in sorted(scores.items()):
             t1, t2 = k.split('|')
-            print(f'    {t1} vs {t2}：{v}')
+            scorer_info = scorers.get(k, '')
+            print(f'    {t1} vs {t2}：{v}' + (f'  {scorer_info}' if scorer_info else ''))
 
     print('\n🏗️   在本機生成 ICS...')
-    ics = generate_ics(scores)
+    ics = generate_ics(scores, scorers)
     score_count = sum(1 for line in ics.splitlines() if '（' in line and '）' in line and 'SUMMARY' in line)
     print(f'    ✅ 生成完成（{len(ics):,} bytes，{score_count} 場有比分）')
 
