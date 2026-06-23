@@ -240,6 +240,8 @@ def fold_line(line):
 def generate_ics(scores_map, scorers_map=None):
     if scorers_map is None:
         scorers_map = {}
+    # DTSTAMP 是 RFC 5545 必填欄位，同時作為 Apple Calendar 判斷版本新舊的依據
+    now_stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     lines = [
         'BEGIN:VCALENDAR',
         'VERSION:2.0',
@@ -249,6 +251,9 @@ def generate_ics(scores_map, scorers_map=None):
         'X-WR-TIMEZONE:Asia/Taipei',
         'CALSCALE:GREGORIAN',
         'METHOD:PUBLISH',
+        'REFRESH-INTERVAL;VALUE=DURATION:PT2H',
+        'X-PUBLISHED-TTL:PT2H',
+        f'LAST-MODIFIED:{now_stamp}',
     ]
 
     for no, dtstart, dur_min, vkey, t1, t2, stage in MATCHES:
@@ -281,6 +286,8 @@ def generate_ics(scores_map, scorers_map=None):
             '',
             'BEGIN:VEVENT',
             f'UID:wc2026-match-{str(no).zfill(3)}@calendar',
+            f'DTSTAMP:{now_stamp}',
+            'SEQUENCE:0',
             f'DTSTART:{dtstart}',
             f'DTEND:{calc_dtend(dtstart, dur_min)}',
             f'SUMMARY:{summary}',
