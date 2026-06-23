@@ -222,6 +222,85 @@ def utc_to_local(dtstart, offset_h):
 def calc_dtend(dtstart, dur_min):
     return (_parse_dt(dtstart) + timedelta(minutes=dur_min)).strftime('%Y%m%dT%H%M%SZ')
 
+# ── 淘汰賽自動解析（核心新功能） ─────────────────────────────────────────────────
+
+def _tw_time_key(dtstart_utc):
+    """UTC 時間字串 → 台灣時間 key，格式 'MM/DD HH:MM'"""
+    dt = _parse_dt(dtstart_utc)
+    tw = dt + timedelta(hours=8)
+    return tw.strftime('%m/%d %H:%M')
+
+def build_knockout_bracket(time_results):
+    """依台灣時間比對 time_results 與淘汰賽場次（允許 ±30 分鐘誤差）
+    返回 {match_no: {'t1', 't2', 'score', 'scorers'}}
+    """
+    bracket = {}
+    if not time_results:
+        return bracket
+
+    knockout = [(entry[0], _tw_time_key(entry[1]))
+                for entry in MATCHES if not entry[6].startswith('G')]
+
+    def _to_mins(key):
+        mo = re.match(r'(\d{2})/(\d{2}) (\d{2}):(\d{2})', key)
+        if not mo: return -1
+        mm, dd, hh, mi = map(int, mo.groups())
+        return (mm * 31 + dd) * 1440 + hh * 60 + mi
+
+    for result_key, result_data in time_results.items():
+        rm = _to_mins(result_key)
+        if rm < 0: continue
+        best_no, best_diff = None, 31   # 最多允許 30 分鐘誤差
+        for no, our_key in knockout:
+            diff = abs(rm - _to_mins(our_key))
+            if diff <= 30 and diff < best_diff:
+                best_diff = diff
+                best_no = no
+        if best_no is not None and best_no not in bracket:
+            bracket[best_no] = result_data.copy()
+
+    return bracket
+
+def resolve_matches(bracket):
+    """根據 bracket 解析 MATCHES 中的佔位符，回傳含真實隊名的 MATCHES copy
+    - 'A組亞軍'、'I組冠軍' 等 → 以 bracket 中實際比賽的隊名取代
+    - 'M73勝者' 等 → 根據已完成比賽的勝者自動推算鏈式結果
+    """
+    # 建立勝者對照表（比賽場次 → 勝隊 key）
+    winner_map = {}
+    for no, info in bracket.items():
+        if info.get('score'):
+            mo = re.match(r'(\d+)-(\d+)', info['score'])
+            if mo:
+                s1, s2 = int(mo.group(1)), int(mo.group(2))
+                if s1 > s2:
+                    winner_map[no] = info['t1']
+                elif s2 > s1:
+                    winner_map[no] = info['t2']
+                # 平局 → 延長賽/PK 決定，等後續更新
+
+    def resolve_ref(name):
+        mo = re.match(r'M(\d+)勝者', name)
+        if mo:
+            ref_no = int(mo.group(1))
+            return winner_map.get(ref_no, name)
+        return name
+
+    resolved = []
+    for entry in MATCHES:
+        no, dtstart, dur, vkey, t1, t2, stage = entry
+        # 淘汰賽：以 bracket 的實際隊名取代佔位符
+        if not stage.startswith('G') and no in bracket:
+            bkt = bracket[no]
+            if bkt.get('t1'): t1 = bkt['t1']
+            if bkt.get('t2'): t2 = bkt['t2']
+        # 解析前向引用（'MXX勝者'）
+        t1 = resolve_ref(t1)
+        t2 = resolve_ref(t2)
+        resolved.append([no, dtstart, dur, vkey, t1, t2, stage])
+
+    return resolved
+
 # ── ICS 折行（RFC 5545，以 UTF-8 bytes 計算） ──────────────────────────────────
 def fold_line(line):
     encoded = line.encode('utf-8')
@@ -241,9 +320,12 @@ def fold_line(line):
     return '\r\n'.join(parts) + '\r\n'
 
 # ── ICS 生成 ──────────────────────────────────────────────────────────────────
-def generate_ics(scores_map, scorers_map=None):
+def generate_ics(scores_map, scorers_map=None, matches=None):
+    """生成 ICS 檔案。matches 預設使用 MATCHES，傳入 resolve_matches() 的結果可自動更新淘汰賽隊名"""
     if scorers_map is None:
         scorers_map = {}
+    if matches is None:
+        matches = MATCHES
     # DTSTAMP 是 RFC 5545 必填欄位，同時作為 Apple Calendar 判斷版本新舊的依據
     now_stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ')
     lines = [
@@ -260,7 +342,7 @@ def generate_ics(scores_map, scorers_map=None):
         f'LAST-MODIFIED:{now_stamp}',
     ]
 
-    for no, dtstart, dur_min, vkey, t1, t2, stage in MATCHES:
+    for no, dtstart, dur_min, vkey, t1, t2, stage in matches:
         v = VENUES[vkey]
         stage_zh = STAGE_ZH[stage]
         stage_en = STAGE_EN[stage]
@@ -345,12 +427,9 @@ def _norm(name):
     return TEAM_ALIAS.get(name) or TEAM_ALIAS.get(name.strip())
 
 def _add_score(scores, h_key, a_key, hs, as_):
-    """嘗試兩種方向加入比分"""
-    k1, k2 = f'{h_key}|{a_key}', f'{a_key}|{h_key}'
-    if k1 in VALID_KEYS:
-        scores[k1] = f'{hs}-{as_}'
-    elif k2 in VALID_KEYS:
-        scores[k2] = f'{as_}-{hs}'
+    """雙向儲存比分（小組賽 + 淘汰賽皆適用）"""
+    scores[f'{h_key}|{a_key}'] = f'{hs}-{as_}'
+    scores[f'{a_key}|{h_key}'] = f'{as_}-{hs}'
 
 # ── 抓取工具 ──────────────────────────────────────────────────────────────────
 def fetch_html(url, extra_headers=None):
@@ -374,11 +453,16 @@ def fetch_html(url, extra_headers=None):
 
 # ── 共用：解析含比分與進球資訊的 HTML 表格 ──────────────────────────────────
 def _parse_score_table(html):
-    """解析 worldcups.tw / Fifa世界杯.tw 格式的賽程表，回傳 (scores, scorers)"""
+    """解析 worldcups.tw / Fifa世界杯.tw 格式的賽程表
+    回傳 (scores, scorers, time_results)
+    time_results: {'MM/DD HH:MM': {'t1':..., 't2':..., 'score':..., 'scorers':...}}
+    """
     scores = {}
     scorers = {}
+    time_results = {}
     rows = re.findall(r'<tr[^>]*>(.*?)</tr>', html, re.DOTALL | re.IGNORECASE)
     last_key = None
+    last_tw = None
     for row in rows:
         cells = [
             re.sub(r'<[^>]+>', '', c).replace('\xa0', ' ').strip()
@@ -387,49 +471,68 @@ def _parse_score_table(html):
         # 進球資訊列：第一格含 ⚽ 或「分」且其餘格為空
         if cells and ('⚽' in cells[0] or ('分' in cells[0] and len(cells[0]) > 5)) \
                 and all(c == '' for c in cells[1:]):
+            scorer_txt = re.sub(r'\s+', ' ', cells[0]).strip()
             if last_key:
-                scorers[last_key] = re.sub(r'\s+', ' ', cells[0]).strip()
+                scorers[last_key] = scorer_txt
+            if last_tw and last_tw in time_results:
+                time_results[last_tw]['scorers'] = scorer_txt
             last_key = None
+            last_tw = None
             continue
         # 比賽主列：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
         if len(cells) < 5:
             last_key = None
+            last_tw = None
             continue
         if '比賽結束' not in cells[4]:
             last_key = None
+            last_tw = None
             continue
         m = re.search(r'(\d+)\s*[:\-]\s*(\d+)', cells[2])
         if not m:
             last_key = None
+            last_tw = None
             continue
         hk = _norm(cells[1])
         ak = _norm(cells[3])
         if not hk or not ak:
             last_key = None
+            last_tw = None
             continue
         _add_score(scores, hk, ak, m.group(1), m.group(2))
+        # 提取台灣時間 key（格式 'MM/DD HH:MM'，用於淘汰賽時間匹配）
+        tm = re.search(r'(\d{2}/\d{2}).*?(\d{2}:\d{2})', cells[0])
+        tw_key = f"{tm.group(1)} {tm.group(2)}" if tm else None
+        if tw_key:
+            time_results[tw_key] = {
+                't1': hk, 't2': ak,
+                'score': f'{m.group(1)}-{m.group(2)}',
+                'scorers': ''
+            }
+        # 小組賽進球追蹤（VALID_KEYS）
         k1, k2 = f'{hk}|{ak}', f'{ak}|{hk}'
         last_key = k1 if k1 in VALID_KEYS else (k2 if k2 in VALID_KEYS else None)
-    return scores, scorers
+        last_tw = tw_key
+    return scores, scorers, time_results
 
 # ── 比分來源：worldcups.tw ────────────────────────────────────────────────────
 def fetch_worldcups_tw_scores():
-    """從 worldcups.tw 抓取比分與進球資訊，回傳 (scores_map, scorers_map)"""
+    """從 worldcups.tw 抓取比分與進球資訊，回傳 (scores_map, scorers_map, time_results)"""
     try:
         html = fetch_html('https://worldcups.tw/livescore/')
         return _parse_score_table(html)
     except Exception as e:
         print(f'    ⚠️  worldcups.tw 失敗：{e}')
-        return {}, {}
+        return {}, {}, {}
 
 def fetch_fifatw_scores():
-    """從 Fifa世界杯.tw 抓取比分與進球資訊（備用來源），回傳 (scores_map, scorers_map)"""
+    """從 Fifa世界杯.tw 抓取比分與進球資訊（備用來源），回傳 (scores_map, scorers_map, time_results)"""
     try:
         html = fetch_html('https://xn--fifa-tc5fq65k1ju.tw/world-cup-2026-schedule/')
         return _parse_score_table(html)
     except Exception as e:
         print(f'    ⚠️  Fifa世界杯.tw 失敗：{e}')
-        return {}, {}
+        return {}, {}, {}
 
 # ── 寫入 KV（透過 Cloudflare REST API） ──────────────────────────────────────
 def get_cf_token():
@@ -480,15 +583,16 @@ def kv_put(key, value_str):
 
 # ── 主程式 ────────────────────────────────────────────────────────────────────
 def main():
-    scores = {}
-
     print('📡  抓取 worldcups.tw 比分與進球資訊...')
-    scores, scorers = fetch_worldcups_tw_scores()
-    print(f'    ✅ {len(scores)} 筆比分，{len(scorers)} 場有進球資訊')
+    scores, scorers, time_r1 = fetch_worldcups_tw_scores()
+    print(f'    ✅ {len(scores)//2} 筆比分，{len(scorers)} 場有進球資訊，'
+          f'{len(time_r1)} 筆時間索引')
 
     print('📡  抓取 Fifa世界杯.tw（補充來源）...')
-    scores2, scorers2 = fetch_fifatw_scores()
-    print(f'    ✅ {len(scores2)} 筆比分，{len(scorers2)} 場有進球資訊')
+    scores2, scorers2, time_r2 = fetch_fifatw_scores()
+    print(f'    ✅ {len(scores2)//2} 筆比分，{len(scorers2)} 場有進球資訊，'
+          f'{len(time_r2)} 筆時間索引')
+
     # 合併：以 worldcups.tw 為主，Fifa世界杯.tw 補缺漏
     for k, v in scores2.items():
         if k not in scores:
@@ -496,27 +600,64 @@ def main():
     for k, v in scorers2.items():
         if k not in scorers:
             scorers[k] = v
-    print(f'    合計 {len(scores)} 筆比分，{len(scorers)} 場有進球資訊')
+    time_results = {**time_r2, **time_r1}   # time_r1 優先
+    total_matches = len(scores) // 2
+    print(f'    合計 {total_matches} 筆比分，{len(scorers)} 場有進球資訊')
+
+    # ── 淘汰賽自動解析 ───────────────────────────────────────────────────────────
+    print('\n🏆  解析淘汰賽對戰與勝者推算...')
+    bracket = build_knockout_bracket(time_results)
+    if bracket:
+        for no, info in bracket.items():
+            t1zh = NAMES_ZH.get(info['t1'], info['t1'])
+            t2zh = NAMES_ZH.get(info['t2'], info['t2'])
+            score = info.get('score', '未知')
+            print(f'    M{no}: {t1zh} vs {t2zh}（{score}）')
+    else:
+        print('    ℹ️  淘汰賽尚未開始，佔位符將保留原樣')
+
+    resolved_matches = resolve_matches(bracket)
+
+    # 將淘汰賽比分/進球注入 scores/scorers（依解析後的真實隊名）
+    for no, info in bracket.items():
+        if not info.get('score'):
+            continue
+        for entry in resolved_matches:
+            if entry[0] == no:
+                rt1, rt2 = entry[4], entry[5]
+                s1, s2 = info['score'].split('-')
+                scores.setdefault(f'{rt1}|{rt2}', info['score'])
+                scores.setdefault(f'{rt2}|{rt1}', f'{s2}-{s1}')
+                if info.get('scorers'):
+                    scorers.setdefault(f'{rt1}|{rt2}', info['scorers'])
+                    scorers.setdefault(f'{rt2}|{rt1}', info['scorers'])
+                break
 
     if not scores:
-        print('⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
+        print('\n⚠️  無比分資料（賽事未開始或來源暫時不可用），將寫入無比分的賽程。')
     else:
-        print(f'\n✅  合計 {len(scores)} 筆比分：')
-        for k, v in sorted(scores.items()):
-            t1, t2 = k.split('|')
-            scorer_info = scorers.get(k, '')
-            print(f'    {t1} vs {t2}：{v}' + (f'  {scorer_info}' if scorer_info else ''))
+        print(f'\n✅  比分明細（小組賽 + 淘汰賽）：')
+        # 僅顯示 MATCHES 順序方向，避免重複印出
+        match_keys = {f'{t1}|{t2}' for _, _, _, _, t1, t2, _ in resolved_matches}
+        for k in sorted(match_keys):
+            if k in scores:
+                t1, t2 = k.split('|')
+                t1zh = NAMES_ZH.get(t1, t1)
+                t2zh = NAMES_ZH.get(t2, t2)
+                scorer_info = scorers.get(k, '')
+                print(f'    {t1zh} vs {t2zh}：{scores[k]}'
+                      + (f'  {scorer_info}' if scorer_info else ''))
 
-    print('\n🏗️   在本機生成 ICS...')
-    ics = generate_ics(scores, scorers)
+    print('\n🏗️   在本機生成 ICS（含淘汰賽解析結果）...')
+    ics = generate_ics(scores, scorers, resolved_matches)
     score_count = sum(1 for line in ics.splitlines() if '（' in line and '）' in line and 'SUMMARY' in line)
     print(f'    ✅ 生成完成（{len(ics):,} bytes，{score_count} 場有比分）')
 
     # 本機驗證：印出前幾筆有比分的行事曆標題
-    print('\n    驗證比分格式：')
+    print('\n    驗證比分格式（前3筆）：')
     shown = 0
     for line in ics.splitlines():
-        if 'SUMMARY:小組賽' in line and '（' in line:
+        if line.startswith('SUMMARY:') and '（' in line and '）' in line:
             print(f'    ✓ {line[8:]}')
             shown += 1
             if shown >= 3: break
