@@ -224,6 +224,76 @@ def calc_dtend(dtstart, dur_min):
 
 # ── 淘汰賽自動解析（核心新功能） ─────────────────────────────────────────────────
 
+def compute_group_standings(scores_dict):
+    """從已完成的小組賽比分計算各組積分表
+    只有當一個組的所有6場比賽都完成時，才計入 standings。
+    返回: {'A': [('Mexico', pts, gd, gf), ...], ...} (降序)
+    """
+    # 建立各組隊伍清單（從 MATCHES 動態推導）
+    groups = {}
+    group_matches_list = {}
+    for entry in MATCHES:
+        no, dtstart, dur, vkey, t1, t2, stage = entry
+        if stage.startswith('G') and len(stage) == 2:
+            g = stage[1]   # 'GA' → 'A'
+            groups.setdefault(g, set())
+            groups[g].add(t1)
+            groups[g].add(t2)
+            group_matches_list.setdefault(g, []).append((t1, t2))
+
+    standings = {}
+    for g in sorted(groups.keys()):
+        teams = groups[g]
+        team_stats = {t: {'pts': 0, 'gd': 0, 'gf': 0} for t in teams}
+        all_done = True
+
+        for t1, t2 in group_matches_list[g]:
+            k = f'{t1}|{t2}'
+            if k not in scores_dict:
+                all_done = False
+                continue
+            mo = re.match(r'(\d+)-(\d+)', scores_dict[k])
+            if not mo:
+                all_done = False
+                continue
+            s1, s2 = int(mo.group(1)), int(mo.group(2))
+            team_stats[t1]['gf'] += s1
+            team_stats[t2]['gf'] += s2
+            team_stats[t1]['gd'] += s1 - s2
+            team_stats[t2]['gd'] += s2 - s1
+            if s1 > s2:
+                team_stats[t1]['pts'] += 3
+            elif s2 > s1:
+                team_stats[t2]['pts'] += 3
+            else:
+                team_stats[t1]['pts'] += 1
+                team_stats[t2]['pts'] += 1
+
+        if not all_done:
+            continue  # 此組尚未完賽，不計入
+
+        sorted_teams = sorted(
+            team_stats.items(),
+            key=lambda x: (x[1]['pts'], x[1]['gd'], x[1]['gf']),
+            reverse=True
+        )
+        standings[g] = [(t, s['pts'], s['gd'], s['gf']) for t, s in sorted_teams]
+
+    return standings
+
+
+def assign_group_slots(standings):
+    """積分表 → 組別佔位符映射
+    返回: {'A組冠軍': 'Mexico', 'A組亞軍': 'SouthAfrica', 'A組第三': 'SouthKorea', ...}
+    """
+    slots = {}
+    for g, ranked in standings.items():
+        if len(ranked) >= 1: slots[f'{g}組冠軍'] = ranked[0][0]
+        if len(ranked) >= 2: slots[f'{g}組亞軍'] = ranked[1][0]
+        if len(ranked) >= 3: slots[f'{g}組第三'] = ranked[2][0]
+    return slots
+
+
 def _tw_time_key(dtstart_utc):
     """UTC 時間字串 → 台灣時間 key，格式 'MM/DD HH:MM'"""
     dt = _parse_dt(dtstart_utc)
@@ -261,11 +331,17 @@ def build_knockout_bracket(time_results):
 
     return bracket
 
-def resolve_matches(bracket):
-    """根據 bracket 解析 MATCHES 中的佔位符，回傳含真實隊名的 MATCHES copy
-    - 'A組亞軍'、'I組冠軍' 等 → 以 bracket 中實際比賽的隊名取代
-    - 'M73勝者' 等 → 根據已完成比賽的勝者自動推算鏈式結果
+def resolve_matches(bracket, group_slots=None):
+    """根據 bracket 與 group_slots 解析 MATCHES 中的佔位符，回傳含真實隊名的 MATCHES copy
+
+    解析優先順序：
+    1. group_slots（小組積分表）→ 解析 'A組冠軍', 'H組亞軍' 等
+    2. bracket（已完成淘汰賽比賽資料）→ 取代步驟1結果（最準確）
+    3. winner_map（已完成比賽的勝者）→ 解析 'M73勝者' 等前向引用
     """
+    if group_slots is None:
+        group_slots = {}
+
     # 建立勝者對照表（比賽場次 → 勝隊 key）
     winner_map = {}
     for no, info in bracket.items():
@@ -280,6 +356,7 @@ def resolve_matches(bracket):
                 # 平局 → 延長賽/PK 決定，等後續更新
 
     def resolve_ref(name):
+        """解析 'MXX勝者' 前向引用"""
         mo = re.match(r'M(\d+)勝者', name)
         if mo:
             ref_no = int(mo.group(1))
@@ -289,12 +366,19 @@ def resolve_matches(bracket):
     resolved = []
     for entry in MATCHES:
         no, dtstart, dur, vkey, t1, t2, stage = entry
-        # 淘汰賽：以 bracket 的實際隊名取代佔位符
-        if not stage.startswith('G') and no in bracket:
-            bkt = bracket[no]
-            if bkt.get('t1'): t1 = bkt['t1']
-            if bkt.get('t2'): t2 = bkt['t2']
-        # 解析前向引用（'MXX勝者'）
+
+        if not stage.startswith('G'):
+            # 步驟 1：先用小組積分表解析組別佔位符（如 'A組亞軍'）
+            t1 = group_slots.get(t1, t1)
+            t2 = group_slots.get(t2, t2)
+
+            # 步驟 2：若此場比賽已打完（在 bracket 中），以實際比賽隊名覆蓋（最準確）
+            if no in bracket:
+                bkt = bracket[no]
+                if bkt.get('t1'): t1 = bkt['t1']
+                if bkt.get('t2'): t2 = bkt['t2']
+
+        # 步驟 3：解析 'MXX勝者' 等前向引用（鏈式推算）
         t1 = resolve_ref(t1)
         t2 = resolve_ref(t2)
         resolved.append([no, dtstart, dur, vkey, t1, t2, stage])
@@ -604,6 +688,20 @@ def main():
     total_matches = len(scores) // 2
     print(f'    合計 {total_matches} 筆比分，{len(scorers)} 場有進球資訊')
 
+    # ── 小組積分計算 ─────────────────────────────────────────────────────────────
+    print('\n📊  計算小組積分表，解析組別佔位符...')
+    standings = compute_group_standings(scores)
+    group_slots = assign_group_slots(standings)
+    if standings:
+        completed = sorted(standings.keys())
+        print(f'    ✅ {len(standings)}/12 組完賽：{"、".join(completed)}組')
+        for g in completed:
+            ranked = standings[g]
+            names = [NAMES_ZH.get(t, t) for t, *_ in ranked]
+            print(f'    {g}組：① {names[0]}  ② {names[1]}  ③ {names[2]}  ④ {names[3]}')
+    else:
+        print('    ℹ️  小組賽尚未全部結束，組別佔位符暫時保留')
+
     # ── 淘汰賽自動解析 ───────────────────────────────────────────────────────────
     print('\n🏆  解析淘汰賽對戰與勝者推算...')
     bracket = build_knockout_bracket(time_results)
@@ -616,7 +714,7 @@ def main():
     else:
         print('    ℹ️  淘汰賽尚未開始，佔位符將保留原樣')
 
-    resolved_matches = resolve_matches(bracket)
+    resolved_matches = resolve_matches(bracket, group_slots)
 
     # 將淘汰賽比分/進球注入 scores/scorers（依解析後的真實隊名）
     for no, info in bracket.items():
