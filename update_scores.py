@@ -579,7 +579,9 @@ def _parse_score_table(html):
         m = re.search(r'(\d+)\s*[:\-]\s*(\d+)', cells[2])
 
         # 提取台灣時間 key（格式 'MM/DD HH:MM'）
-        tm = re.search(r'(\d{2}/\d{2}).*?(\d{2}:\d{2})', cells[0])
+        # 先把 cells[0] 中的換行/多餘空白折疊成一個空格，避免 re.search 的 . 不匹配 \n
+        cell0_norm = re.sub(r'\s+', ' ', cells[0]).strip()
+        tm = re.search(r'(\d{2}/\d{2}).*?(\d{2}:\d{2})', cell0_norm)
         tw_key = f"{tm.group(1)} {tm.group(2)}" if tm else None
 
         score_str = ''
