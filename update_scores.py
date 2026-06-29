@@ -563,17 +563,8 @@ def _parse_score_table(html):
             last_key = None
             last_tw = None
             continue
-        # 比賽主列：[日期, 主隊, 比分, 客隊, 狀態, 場地, 輪次]
+        # 比賽主列：[日期, 主隊, 比分/VS, 客隊, 狀態, 場地, 輪次]
         if len(cells) < 5:
-            last_key = None
-            last_tw = None
-            continue
-        if '比賽結束' not in cells[4]:
-            last_key = None
-            last_tw = None
-            continue
-        m = re.search(r'(\d+)\s*[:\-]\s*(\d+)', cells[2])
-        if not m:
             last_key = None
             last_tw = None
             continue
@@ -583,20 +574,37 @@ def _parse_score_table(html):
             last_key = None
             last_tw = None
             continue
-        _add_score(scores, hk, ak, m.group(1), m.group(2))
-        # 提取台灣時間 key（格式 'MM/DD HH:MM'，用於淘汰賽時間匹配）
+
+        is_finished = '比賽結束' in cells[4]
+        m = re.search(r'(\d+)\s*[:\-]\s*(\d+)', cells[2])
+
+        # 提取台灣時間 key（格式 'MM/DD HH:MM'）
         tm = re.search(r'(\d{2}/\d{2}).*?(\d{2}:\d{2})', cells[0])
         tw_key = f"{tm.group(1)} {tm.group(2)}" if tm else None
-        if tw_key:
+
+        score_str = ''
+        if is_finished and m:
+            # 完賽：儲存比分（雙向）
+            _add_score(scores, hk, ak, m.group(1), m.group(2))
+            score_str = f'{m.group(1)}-{m.group(2)}'
+
+        # 所有有效比賽（含未開賽）都記錄隊名到 time_results，供淘汰賽隊名解析用
+        # 若已有完賽資料則不覆蓋（完賽 > 未開賽）
+        if tw_key and (tw_key not in time_results or (is_finished and m)):
             time_results[tw_key] = {
                 't1': hk, 't2': ak,
-                'score': f'{m.group(1)}-{m.group(2)}',
+                'score': score_str,
                 'scorers': ''
             }
-        # 小組賽進球追蹤（VALID_KEYS）
-        k1, k2 = f'{hk}|{ak}', f'{ak}|{hk}'
-        last_key = k1 if k1 in VALID_KEYS else (k2 if k2 in VALID_KEYS else None)
-        last_tw = tw_key
+
+        # 小組賽進球追蹤（VALID_KEYS），僅完賽有效
+        if is_finished and m:
+            k1, k2 = f'{hk}|{ak}', f'{ak}|{hk}'
+            last_key = k1 if k1 in VALID_KEYS else (k2 if k2 in VALID_KEYS else None)
+            last_tw = tw_key
+        else:
+            last_key = None
+            last_tw = tw_key  # 仍更新 tw_key，方便後續比賽行覆蓋
     return scores, scorers, time_results
 
 # ── 比分來源：worldcups.tw ────────────────────────────────────────────────────
